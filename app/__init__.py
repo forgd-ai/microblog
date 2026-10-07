@@ -1,6 +1,7 @@
 import logging
 from logging.handlers import SMTPHandler, RotatingFileHandler
 import os
+import re
 from flask import Flask, request, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -12,6 +13,29 @@ from elasticsearch import Elasticsearch
 from redis import Redis
 import rq
 from config import Config
+
+
+class AbsproxyPrefix:
+    """Serves the app under code-server's /absproxy/<port> path.
+
+    code-server's /absproxy/<port>/ proxy passes the full path through, so a
+    request arrives as /absproxy/5001/auth/login. This moves the prefix into
+    SCRIPT_NAME, so routes match and url_for() builds links that stay behind
+    the proxy. Requests without the prefix, such as localhost:5001, are not
+    changed.
+    """
+
+    PREFIX = re.compile(r'^/absproxy/\d+')
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        match = self.PREFIX.match(environ.get('PATH_INFO', ''))
+        if match:
+            environ['SCRIPT_NAME'] = environ.get('SCRIPT_NAME', '') + match.group(0)
+            environ['PATH_INFO'] = environ['PATH_INFO'][match.end():] or '/'
+        return self.wsgi_app(environ, start_response)
 
 
 def get_locale():
@@ -31,6 +55,7 @@ babel = Babel()
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    app.wsgi_app = AbsproxyPrefix(app.wsgi_app)
 
     db.init_app(app)
     migrate.init_app(app, db)
