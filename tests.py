@@ -138,6 +138,11 @@ class ProxyPrefixCase(unittest.TestCase):
         self.assertIn("fetch('/user/'", html)
         self.assertNotIn('absproxy', html)
 
+    def test_malformed_prefix_is_not_rewritten(self):
+        rv = self.client.get('/absproxy/5001auth/login')
+        self.assertEqual(rv.status_code, 404)
+        self.assertNotIn('absproxy/5001/', rv.get_data(as_text=True))
+
     def test_prefix_alone_serves_the_root(self):
         rv = self.client.get('/absproxy/5001')
         self.assertEqual(rv.status_code, 302)

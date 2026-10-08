@@ -25,7 +25,7 @@ class AbsproxyPrefix:
     changed.
     """
 
-    PREFIX = re.compile(r'^/absproxy/\d+')
+    PREFIX = re.compile(r'^/absproxy/\d+(?=/|$)')
 
     def __init__(self, wsgi_app):
         self.wsgi_app = wsgi_app
