@@ -102,5 +102,53 @@ class UserModelCase(unittest.TestCase):
         self.assertEqual(f4, [p4])
 
 
+class ProxyPrefixCase(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app(TestConfig)
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+        db.create_all()
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
+
+    def test_absproxy_request_builds_prefixed_links(self):
+        rv = self.client.get('/absproxy/5001/auth/register')
+        self.assertEqual(rv.status_code, 200)
+        html = rv.get_data(as_text=True)
+        self.assertIn('href="/absproxy/5001/auth/login"', html)
+        self.assertIn("fetch('/absproxy/5001/translate'", html)
+        self.assertIn("fetch('/absproxy/5001/user/'", html)
+
+    def test_absproxy_redirect_keeps_prefix(self):
+        rv = self.client.get('/absproxy/5001/')
+        self.assertEqual(rv.status_code, 302)
+        self.assertTrue(rv.headers['Location'].startswith(
+            '/absproxy/5001/auth/login'), rv.headers['Location'])
+
+    def test_plain_request_builds_links_without_prefix(self):
+        rv = self.client.get('/auth/register')
+        self.assertEqual(rv.status_code, 200)
+        html = rv.get_data(as_text=True)
+        self.assertIn('href="/auth/login"', html)
+        self.assertIn("fetch('/translate'", html)
+        self.assertIn("fetch('/user/'", html)
+        self.assertNotIn('absproxy', html)
+
+    def test_malformed_prefix_is_not_rewritten(self):
+        rv = self.client.get('/absproxy/5001auth/login')
+        self.assertEqual(rv.status_code, 404)
+        self.assertNotIn('absproxy/5001/', rv.get_data(as_text=True))
+
+    def test_prefix_alone_serves_the_root(self):
+        rv = self.client.get('/absproxy/5001')
+        self.assertEqual(rv.status_code, 302)
+        self.assertTrue(rv.headers['Location'].startswith(
+            '/absproxy/5001/auth/login'), rv.headers['Location'])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
