@@ -316,17 +316,18 @@ class Post(PaginatedAPIMixin, SearchableMixin, db.Model):
         """Replace this post's tags with ``names``, reusing existing Tag rows
         and creating any that are missing."""
         names = list(dict.fromkeys(n.lower() for n in names if n))
-        existing = {}
-        if names:
-            existing = {t.name: t for t in db.session.scalars(
-                sa.select(Tag).where(Tag.name.in_(names)))}
-        tags = []
-        for name in names:
-            tag = existing.get(name)
-            if tag is None:
-                tag = Tag(name=name)
-                db.session.add(tag)
-            tags.append(tag)
+        with db.session.no_autoflush:
+            existing = {}
+            if names:
+                existing = {t.name: t for t in db.session.scalars(
+                    sa.select(Tag).where(Tag.name.in_(names)))}
+            tags = []
+            for name in names:
+                tag = existing.get(name)
+                if tag is None:
+                    tag = Tag(name=name)
+                    db.session.add(tag)
+                tags.append(tag)
         self.tags = tags
 
     def to_dict(self):

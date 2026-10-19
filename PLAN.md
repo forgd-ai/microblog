@@ -6,7 +6,7 @@ Goal:
 - `GET /api/tags/<name>/posts` returns them as JSON in the existing API style.
 - The index page shows the 5 most used tags this week.
 
-## Shared contract
+## Shared contract (original plan, superseded: see Status and the code for the current version)
 
 Every lane builds against this. Change it here first, then tell the other lanes.
 
@@ -26,7 +26,7 @@ Every lane builds against this. Change it here first, then tell the other lanes.
 - **Lane 1 (tags-model): done, with two checks outstanding.**
   - Built: `app/tags.py`, the `Tag`/`post_tags`/`Post.tags`/`set_tags`/`posts_query`/`to_dict` changes in `app/models.py`, and `migrations/versions/a3f9c27e1d54_tags.py` (down_revision `834b1a697901`, with backfill).
   - Verified: `extract_tags` output, `set_tags` replace and reuse, and `python -m unittest tests` (9 tests, OK).
-  - **Not run:** `flask db upgrade` / `downgrade -1` on a populated DB, and `flask db heads`. The agent could not run `flask` in its sandbox.
+  - **Not run:** `flask db upgrade` / `downgrade -- -1` on a populated DB, and `flask db heads`. The agent could not run `flask` in its sandbox.
   - Contract changes the other lanes must follow:
     - `posts_query()` is an instance method: look the tag up by name, then call `tag.posts_query()`. It is not `Tag.posts_query(...)`.
     - `Post.to_dict()`: `author` is the user id, `_links.tags` is a `{name: url}` dict, and `_links.self` is omitted. Tag URLs come from `url_for('main.tag', name=...)`, so lane 2 must name its view `tag`. Until it exists the URL is `None`.
@@ -50,11 +50,11 @@ Every lane builds against this. Change it here first, then tell the other lanes.
   - Built: 37 new tests in `tests.py` (parser, model, trending, web, API), plus a `DbCase` base class, a `get_token` helper and `WTF_CSRF_ENABLED = False` in `TestConfig`.
   - Verified: `venv/bin/python -m unittest tests` ran 46 tests (9 existing, 37 new), all passing. This is the first real run of lanes 2-4, so it also covers their code paths. The trending window boundary is correct on SQLite; other databases were not tested.
   - Finding in lane 1: `Post.set_tags` (`app/models.py:321`) runs a `SELECT` before the post is in the session, which raises a SQLAlchemy `SAWarning` via autoflush. It is harmless today. A fix is `db.session.no_autoflush` around the lookup, or adding the post first.
-  - **Not done:** checking that each test fails without its lane's change, the Translate link check (needs a browser), and the migration checks (`flask db upgrade`, `downgrade -1`, `heads`).
+  - **Not done:** checking that each test fails without its lane's change, the Translate link check (needs a browser), and the migration checks (`flask db upgrade`, `downgrade -- -1`, `heads`).
 - **Review (tags-reviewer): done. Open issues, not fixed.**
   - **High:** `linkify_tags` (`app/main/routes.py`) escapes first, then matches. `'` becomes `&#39;` and `"` becomes `&#34;`, so `#39` and `#34` match as tags and link to `/tag/39`, which is a 404. This is a display bug, not XSS. Fix: match on the raw body and escape the pieces between matches. No test covers it.
   - **Medium:**
-    - The migration has never been run (`upgrade`, `downgrade -1`, `heads`, `db check`). The reviewer could not run `flask` either.
+    - The migration has never been run (`upgrade`, `downgrade -- -1`, `heads`, `db check`). The reviewer could not run `flask` either.
     - The SAWarning in `Post.set_tags` (`app/models.py:321`) fires on every new post in production, because `index()` calls `set_tags` before `db.session.add(post)`. Fix: `db.session.no_autoflush` around the lookup.
     - `test_tag_page_lists_only_tagged_posts` always passes, because the heading "Posts tagged #flask" contains `tagged`. It should assert the post text.
     - "Each test fails without its lane's change" was never checked, and the Translate link has not been tested in a browser.
@@ -86,7 +86,7 @@ Migration details:
 - It backfills tags from existing post bodies (see open question 3).
 
 Done when:
-- `flask db upgrade` and `flask db downgrade -1` both run cleanly on a copy of a populated DB.
+- `flask db upgrade` and `flask db downgrade -- -1` both run cleanly on a copy of a populated DB.
 - `flask db heads` shows a single head.
 - `python -c "from app.tags import extract_tags; print(extract_tags('Hi #Flask #flask #a_b'))"` prints `['flask', 'a_b']`.
 - `set_tags` replaces tags instead of accumulating them, and reuses existing `Tag` rows.
@@ -191,3 +191,10 @@ Done when `python -m unittest tests` passes with every lane merged, and each tes
 3. **Backfill:** this plan backfills existing posts in the migration so tag pages and trending aren't empty after deploy. The alternative is to tag new posts only.
 4. **Editing or deleting posts:** the app has neither today, so there's no tag cleanup. Orphan `Tag` rows are harmless.
 5. **Search and export:** the Elasticsearch index and `export_posts` (`app/tasks.py:36`) stay as they are. Neither includes tags.
+
+## Fix round 1
+
+- `linkify_tags` now links tags found in the raw body and escapes each piece, so `it's #python` links only `/tag/python`.
+- `Post.set_tags` runs its lookup under `no_autoflush` (no SAWarning).
+- `test_tag_page_lists_only_tagged_posts` now asserts the tagged post body renders and the untagged one is absent.
+- Migration verified by hand: `flask db upgrade`, `downgrade -- -1`, `upgrade` and a single head all work on a scratch DB.

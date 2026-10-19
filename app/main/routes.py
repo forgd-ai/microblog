@@ -26,13 +26,17 @@ def before_request():
 
 @bp.app_template_filter('linkify_tags')
 def linkify_tags(body):
-    """Escape the body, then turn each #tag into a link to its tag page."""
-    def link(match):
-        return Markup('<a href="{}">{}</a>').format(
-            url_for('main.tag', name=match.group(1).lower()), match.group(0))
-    # '#' and \w characters are unchanged by HTML escaping, so matching on
-    # the escaped text finds the same tags that extract_tags does.
-    return Markup(TAG_RE.sub(link, str(escape(body or ''))))
+    """Turn each #tag in the raw body into a link; escape every piece."""
+    body = body or ''
+    out = []
+    pos = 0
+    for match in TAG_RE.finditer(body):
+        out.append(escape(body[pos:match.start()]))
+        out.append(Markup('<a href="{}">{}</a>').format(
+            url_for('main.tag', name=match.group(1).lower()), match.group(0)))
+        pos = match.end()
+    out.append(escape(body[pos:]))
+    return Markup('').join(out)
 
 
 @bp.route('/', methods=['GET', 'POST'])

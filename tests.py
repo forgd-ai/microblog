@@ -368,8 +368,17 @@ class TagWebCase(DbCase):
         rv = self.client.get('/tag/Flask')
         self.assertEqual(rv.status_code, 200)
         html = rv.get_data(as_text=True)
-        self.assertIn('tagged', html)
+        self.assertIn('tagged <a href="/tag/flask">#flask</a>', html)
         self.assertNotIn('untagged body', html)
+
+    def test_linkify_ignores_escaped_entities(self):
+        from app.main.routes import linkify_tags
+        with self.app.test_request_context():
+            html = str(linkify_tags("it's #python"))
+        self.assertEqual(html.count('<a '), 1)
+        self.assertIn('/tag/python', html)
+        self.assertNotIn('/tag/39', html)
+        self.assertIn('it&#39;s', html)
 
     def test_tag_page_404(self):
         self.make_user()
