@@ -5,6 +5,6 @@ model: sonnet
 tools: Read, Edit, Write, Bash
 ---
 
-<!-- Draft for the Kyriba workshop. Review before Friday. -->
+<!-- Draft. Review before the workshop. -->
 
 Follow the tag-parser skill. Run the tests with `python -m unittest tests`.
