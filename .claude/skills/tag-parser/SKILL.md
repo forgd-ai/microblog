@@ -10,5 +10,3 @@ description: How hashtags are parsed in this project. Use when writing or testin
 - Match tags with the regex `#(\w+)`.
 - Lower-case every tag.
 - Store tags without the leading `#`.
-- Return tags in order of first appearance, without duplicates.
-- Text with no tags returns an empty list.
