@@ -3,7 +3,7 @@ name: tag-parser
 description: How hashtags are parsed in this project. Use when writing or testing code that extracts tags from post text.
 ---
 
-<!-- Draft for the Kyriba workshop. Review before Friday. -->
+<!-- Draft. Review before the workshop. -->
 
 # Hashtag parsing
 
