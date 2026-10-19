@@ -21,6 +21,52 @@ Every lane builds against this. Change it here first, then tell the other lanes.
 - **Serializing:** `Post` gets `PaginatedAPIMixin` and `Post.to_dict()` returning `id, body, timestamp (ISO, UTC), language, tags, author` and `_links{self?, author, tag pages}`. This is needed because `Post` has no `to_dict` today (`app/models.py:287`).
 - **Trending:** `trending_tags(limit=5, days=7) -> list[(name, count)]`. It counts distinct posts per tag over a rolling window of `now - 7 days`, ordered by count desc then name asc.
 
+## Status
+
+- **Lane 1 (tags-model): done, with two checks outstanding.**
+  - Built: `app/tags.py`, the `Tag`/`post_tags`/`Post.tags`/`set_tags`/`posts_query`/`to_dict` changes in `app/models.py`, and `migrations/versions/a3f9c27e1d54_tags.py` (down_revision `834b1a697901`, with backfill).
+  - Verified: `extract_tags` output, `set_tags` replace and reuse, and `python -m unittest tests` (9 tests, OK).
+  - **Not run:** `flask db upgrade` / `downgrade -1` on a populated DB, and `flask db heads`. The agent could not run `flask` in its sandbox.
+  - Contract changes the other lanes must follow:
+    - `posts_query()` is an instance method: look the tag up by name, then call `tag.posts_query()`. It is not `Tag.posts_query(...)`.
+    - `Post.to_dict()`: `author` is the user id, `_links.tags` is a `{name: url}` dict, and `_links.self` is omitted. Tag URLs come from `url_for('main.tag', name=...)`, so lane 2 must name its view `tag`. Until it exists the URL is `None`.
+    - `post_tags.tag_id` has an extra index.
+- **Lane 3 (tags-api): written, not verified.**
+  - Built: `app/api/tags.py` (`get_tag_posts`, `GET /api/tags/<name>/posts`, token auth, lower-cased name, JSON 404 for an unknown tag, `page`/`per_page` capped at 100, `tag.posts_query()`), and `tags` added to the import in `app/api/__init__.py`.
+  - **Not run:** every "Done when" check (200 shape, pagination links, 404, 401) and the unit tests. The agent's Bash call was denied.
+- **Lane 2 (tags-web): written, not verified.**
+  - Built in `app/main/routes.py`: `index()` calls `post.set_tags(extract_tags(...))`; the `linkify_tags` filter is registered with `@bp.app_template_filter`, so `app/__init__.py` is untouched; the `/tag/<name>` view is named `tag` and uses `tag.posts_query()`.
+  - Built in templates: `_post.html` uses `post.body|linkify_tags`, and `tag.html` is new.
+  - Deviation: `/tag/<name>` has `@login_required`, like the other main views.
+  - The Translate link was checked by reading the code only: the JS writes to `#translation<id>`, not `#post<id>`.
+  - **Not run:** every "Done when" check and the unit tests. The agent's Bash call was denied.
+- **Lane 4 (tags-trending): written, not verified.**
+  - Built: `app/trending.py` (`trending_tags(limit=5, days=7)`, one grouped query with `count(distinct Post.id)`), `app/templates/_trending.html`, an `app_context_processor` in `app/main/__init__.py`, and one `{% include %}` in `index.html`.
+  - Deviation: the context processor exposes `trending_box` (from a new `trending_box()` helper in `app/trending.py` that adds URLs), not `trending_tags`. The `trending_tags()` contract is unchanged.
+  - The box also shows on Explore; it is not gated on `form`.
+  - **Risk:** `Post.timestamp` is naive UTC on SQLite and is compared with a timezone-aware `datetime`. Lane 5's window-boundary test must cover this.
+  - **Not run:** every "Done when" check and the unit tests. The agent's Bash call was denied.
+- **Lane 5 (tags-tests): done, with gaps.**
+  - Built: 37 new tests in `tests.py` (parser, model, trending, web, API), plus a `DbCase` base class, a `get_token` helper and `WTF_CSRF_ENABLED = False` in `TestConfig`.
+  - Verified: `venv/bin/python -m unittest tests` ran 46 tests (9 existing, 37 new), all passing. This is the first real run of lanes 2-4, so it also covers their code paths. The trending window boundary is correct on SQLite; other databases were not tested.
+  - Finding in lane 1: `Post.set_tags` (`app/models.py:321`) runs a `SELECT` before the post is in the session, which raises a SQLAlchemy `SAWarning` via autoflush. It is harmless today. A fix is `db.session.no_autoflush` around the lookup, or adding the post first.
+  - **Not done:** checking that each test fails without its lane's change, the Translate link check (needs a browser), and the migration checks (`flask db upgrade`, `downgrade -1`, `heads`).
+- **Review (tags-reviewer): done. Open issues, not fixed.**
+  - **High:** `linkify_tags` (`app/main/routes.py`) escapes first, then matches. `'` becomes `&#39;` and `"` becomes `&#34;`, so `#39` and `#34` match as tags and link to `/tag/39`, which is a 404. This is a display bug, not XSS. Fix: match on the raw body and escape the pieces between matches. No test covers it.
+  - **Medium:**
+    - The migration has never been run (`upgrade`, `downgrade -1`, `heads`, `db check`). The reviewer could not run `flask` either.
+    - The SAWarning in `Post.set_tags` (`app/models.py:321`) fires on every new post in production, because `index()` calls `set_tags` before `db.session.add(post)`. Fix: `db.session.no_autoflush` around the lookup.
+    - `test_tag_page_lists_only_tagged_posts` always passes, because the heading "Posts tagged #flask" contains `tagged`. It should assert the post text.
+    - "Each test fails without its lane's change" was never checked, and the Translate link has not been tested in a browser.
+  - **Low:**
+    - The contract and lane text above still describe the old versions of `posts_query`, `to_dict` and the context-processor name. Only this Status section is current.
+    - Two posts creating the same new tag at once can raise an `IntegrityError` (500).
+    - The trending cutoff is timezone-aware against a naive column, which is only tested on SQLite.
+    - `_trending.html` calls `trending_box()` from the template and runs a query on every Index and Explore load.
+    - Two `BuildError` fallbacks are dead code. The one in `trending_box` would also skip the `/absproxy` prefix.
+    - The API runs one extra tag query per post.
+  - The reviewer found every lane inside its file list.
+
 ## Lanes
 
 Lanes 1 and 5 depend on nothing. Lanes 2, 3 and 4 only need the contract, so they can start in parallel against stubs. Each lane's file list is exclusive: no file appears in two lanes.

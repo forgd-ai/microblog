@@ -1,0 +1,18 @@
+<div class="card mb-3">
+    <div class="card-body">
+        <h5 class="card-title">{{ _('Trending this week') }}</h5>
+        {% set tags = trending_box() %}
+        {% if tags %}
+        <ul class="list-unstyled mb-0">
+            {% for tag in tags %}
+            <li>
+                <a href="{{ tag.url }}">#{{ tag.name }}</a>
+                <span class="text-muted">({{ tag.count }})</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted mb-0">{{ _('No trending tags yet.') }}</p>
+        {% endif %}
+    </div>
+</div>

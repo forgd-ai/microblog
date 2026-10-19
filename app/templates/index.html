@@ -6,6 +6,7 @@
     {% if form %}
     {{ wtf.quick_form(form) }}
     {% endif %}
+    {% include '_trending.html' %}
     {% for post in posts %}
         {% include '_post.html' %}
     {% endfor %}

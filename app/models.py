@@ -8,6 +8,7 @@ import sqlalchemy as sa
 import sqlalchemy.orm as so
 from flask import current_app, url_for
 from flask_login import UserMixin
+from werkzeug.routing import BuildError
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 import redis
@@ -284,7 +285,17 @@ def load_user(id):
     return db.session.get(User, int(id))
 
 
-class Post(SearchableMixin, db.Model):
+post_tags = sa.Table(
+    'post_tags',
+    db.metadata,
+    sa.Column('post_id', sa.Integer, sa.ForeignKey('post.id'),
+              primary_key=True),
+    sa.Column('tag_id', sa.Integer, sa.ForeignKey('tag.id'),
+              primary_key=True, index=True)
+)
+
+
+class Post(PaginatedAPIMixin, SearchableMixin, db.Model):
     __searchable__ = ['body']
     id: so.Mapped[int] = so.mapped_column(primary_key=True)
     body: so.Mapped[str] = so.mapped_column(sa.String(140))
@@ -295,9 +306,68 @@ class Post(SearchableMixin, db.Model):
     language: so.Mapped[Optional[str]] = so.mapped_column(sa.String(5))
 
     author: so.Mapped[User] = so.relationship(back_populates='posts')
+    tags: so.Mapped[list['Tag']] = so.relationship(
+        secondary=post_tags, back_populates='posts', order_by='Tag.name')
 
     def __repr__(self):
         return '<Post {}>'.format(self.body)
+
+    def set_tags(self, names):
+        """Replace this post's tags with ``names``, reusing existing Tag rows
+        and creating any that are missing."""
+        names = list(dict.fromkeys(n.lower() for n in names if n))
+        existing = {}
+        if names:
+            existing = {t.name: t for t in db.session.scalars(
+                sa.select(Tag).where(Tag.name.in_(names)))}
+        tags = []
+        for name in names:
+            tag = existing.get(name)
+            if tag is None:
+                tag = Tag(name=name)
+                db.session.add(tag)
+            tags.append(tag)
+        self.tags = tags
+
+    def to_dict(self):
+        tag_names = [t.name for t in self.tags]
+        return {
+            'id': self.id,
+            'body': self.body,
+            'timestamp': self.timestamp.replace(
+                tzinfo=timezone.utc).isoformat(),
+            'language': self.language,
+            'tags': tag_names,
+            'author': self.user_id,
+            '_links': {
+                'author': url_for('api.get_user', id=self.user_id),
+                'tags': {name: _tag_url(name) for name in tag_names},
+            }
+        }
+
+
+def _tag_url(name):
+    # The /tag/<name> view is added by the web lane as main.tag.
+    try:
+        return url_for('main.tag', name=name)
+    except BuildError:
+        return None
+
+
+class Tag(db.Model):
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String(140), index=True,
+                                            unique=True)
+
+    posts: so.WriteOnlyMapped['Post'] = so.relationship(
+        secondary=post_tags, back_populates='tags')
+
+    def __repr__(self):
+        return '<Tag {}>'.format(self.name)
+
+    def posts_query(self):
+        """Select this tag's posts, newest first."""
+        return self.posts.select().order_by(Post.timestamp.desc())
 
 
 class Message(db.Model):
