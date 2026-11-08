@@ -9,7 +9,7 @@ Source: `intent.md`. Tech lead decisions of 2026-11-07 are recorded under Decisi
   - together they form the composite primary key;
   - it also gets an index on `tag_id`.
 - `Post` gets a write-only `tags` relationship through `post_tag`, plus `PaginatedAPIMixin` and `to_dict()`. `Tag` gets a write-only `posts` relationship back.
-- `extract_hashtags(body) -> list[str]` finds each `#` followed by ASCII letters, digits or underscores (the regex `#([A-Za-z0-9_]+)`). It returns the matches lower-cased, without duplicates, in the order they first appear.
+- `parse_tags(body) -> list[str]` finds each `#` followed by ASCII letters, digits or underscores (the regex `#([A-Za-z0-9_]+)`). It returns the matches lower-cased, without duplicates, in the order they first appear.
 - Saving a post: `index()` (`app/main/routes.py:29-38`) tags the post before its single commit. It reuses existing `Tag` rows and creates any that are missing.
 - Migration: one new revision, made with `flask db migrate -m "tags"`. It creates the `tag` and `post_tag` tables, and its downgrade drops them. It changes no existing table.
 
@@ -39,7 +39,7 @@ Source: `intent.md`. Tech lead decisions of 2026-11-07 are recorded under Decisi
 **Slice 1 (now): the parser, saving tags, and the API endpoint**
 - Files: `app/models.py`, `app/main/routes.py`, `app/api/tags.py` (new), `app/api/__init__.py`, `migrations/versions/<new>_tags.py`, `tests.py`.
 - Tests:
-  - `HashtagParserCase`: tests for `extract_hashtags` (see acceptance criteria 1-3).
+  - `TagParseCase`: tests for `parse_tags` (see acceptance criteria 1-3).
   - `TagStorageCase`: posts the index form as a logged-in user and checks the stored rows. It uses a config with `WTF_CSRF_ENABLED = False`.
   - `TagAPICase`: tests for auth, 404, pagination, case-insensitive names, item shape and order.
 
@@ -48,9 +48,9 @@ Source: `intent.md`. Tech lead decisions of 2026-11-07 are recorded under Decisi
 - Tests: `TagPageCase` checks the links in a rendered post, HTML escaping, the `/tag/<name>` listing, its paging, and that the links keep the `/absproxy/<port>` prefix.
 
 ## Acceptance criteria
-1. `extract_hashtags("#Flask and #flask, #py_3!")` returns `["flask", "py_3"]`.
-2. `extract_hashtags("a#b, ##, #, email@x.com")` returns `["b"]`. A `#` inside a word counts.
-3. `extract_hashtags("#café")` returns `["caf"]`, because tags are ASCII only.
+1. `parse_tags("#Flask and #flask, #py_3!")` returns `["flask", "py_3"]`.
+2. `parse_tags("a#b, ##, #, email@x.com")` returns `["b"]`. A `#` inside a word counts.
+3. `parse_tags("#café")` returns `["caf"]`, because tags are ASCII only.
 4. Saving `"#A #a #b"` creates one `post_tag` row each for `a` and `b`. When a later post uses `#a`, it reuses the same `Tag` row.
 5. Saving a post with tags commits only once, and works with `ELASTICSEARCH_URL=None`.
 6. A request with no token gets 401 with the body `{"error": "Unauthorized"}`.
