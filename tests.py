@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from datetime import datetime, timezone, timedelta
 import unittest
+import sqlalchemy as sa
 from app import create_app, db
 from app.models import User, Post
 from config import Config
@@ -148,6 +149,94 @@ class ProxyPrefixCase(unittest.TestCase):
         self.assertEqual(rv.status_code, 302)
         self.assertTrue(rv.headers['Location'].startswith(
             '/absproxy/5001/auth/login'), rv.headers['Location'])
+
+
+# The hashtag tests import parse_tags and Tag inside each test, not at the top
+# of the file, so that before they exist only these tests fail, not the suite.
+
+class TagParseCase(unittest.TestCase):
+    def test_finds_tags_lower_cased(self):
+        from app.models import parse_tags
+        self.assertEqual(parse_tags('I like #Python and #python_3'),
+                         ['python', 'python_3'])
+
+    def test_repeated_tag_once(self):
+        from app.models import parse_tags
+        self.assertEqual(parse_tags('#a #A #a'), ['a'])
+
+    def test_no_tags(self):
+        from app.models import parse_tags
+        self.assertEqual(parse_tags('no tags here'), [])
+
+
+class TagStorageCase(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app(TestConfig)
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+        db.create_all()
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
+
+    def add_post(self, body, author):
+        post = Post(body=body, author=author)
+        db.session.add(post)
+        post.add_tags_from_body()
+        db.session.commit()
+        return post
+
+    def test_tags_stored_once_and_reused(self):
+        from app.models import Tag
+        u = User(username='susan', email='susan@example.com')
+        db.session.add(u)
+        db.session.commit()
+        p1 = self.add_post('#x #X', u)
+        p1_tags = db.session.scalars(p1.tags.select()).all()
+        self.assertEqual([t.name for t in p1_tags], ['x'])
+        p2 = self.add_post('more #x', u)
+        p2_tags = db.session.scalars(p2.tags.select()).all()
+        self.assertEqual([t.id for t in p2_tags], [p1_tags[0].id])
+        self.assertEqual(
+            db.session.scalar(sa.select(sa.func.count()).select_from(Tag)), 1)
+
+
+class TagAPICase(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app(TestConfig)
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+        db.create_all()
+        self.client = self.app.test_client()
+        user = User(username='susan', email='susan@example.com')
+        db.session.add(user)
+        db.session.commit()
+        self.token = user.get_token()
+        self.post = Post(body='#Python', author=user)
+        db.session.add(self.post)
+        self.post.add_tags_from_body()
+        db.session.commit()
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
+
+    def test_get_tag_posts(self):
+        rv = self.client.get('/api/tags/python/posts', headers={
+            'Authorization': f'Bearer {self.token}'})
+        self.assertEqual(rv.status_code, 200)
+        self.assertIn(self.post.id, [p['id'] for p in rv.json['items']])
+        self.assertEqual(rv.json['_meta'], {'page': 1, 'per_page': 10,
+                                            'total_pages': 1,
+                                            'total_items': 1})
+
+    def test_get_tag_posts_requires_token(self):
+        rv = self.client.get('/api/tags/python/posts')
+        self.assertEqual(rv.status_code, 401)
+        self.assertEqual(rv.json, {'error': 'Unauthorized'})
 
 
 if __name__ == '__main__':
