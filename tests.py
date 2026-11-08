@@ -239,5 +239,45 @@ class TagAPICase(unittest.TestCase):
         self.assertEqual(rv.json, {'error': 'Unauthorized'})
 
 
+class TokenApiCase(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app(TestConfig)
+        self.app_context = self.app.app_context()
+        self.app_context.push()
+        db.create_all()
+        self.client = self.app.test_client()
+        u = User(username='svc', email='svc@example.com')
+        u.set_password('secret')
+        db.session.add(u)
+        db.session.commit()
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
+
+    def _new_token(self):
+        rv = self.client.post('/api/tokens', auth=('svc', 'secret'))
+        self.assertEqual(rv.status_code, 200)
+        return rv.get_json()['token']
+
+    def _bearer(self, token):
+        return {'Authorization': f'Bearer {token}'}
+
+    def test_reauth_after_revoke_gives_working_token(self):
+        old = self._new_token()
+        rv = self.client.delete('/api/tokens', headers=self._bearer(old))
+        self.assertEqual(rv.status_code, 204)
+        token = self._new_token()
+        rv = self.client.get('/api/users', headers=self._bearer(token))
+        self.assertEqual(rv.status_code, 200)
+
+    def test_second_login_does_not_invalidate_first_token(self):
+        first = self._new_token()
+        self._new_token()
+        rv = self.client.get('/api/users', headers=self._bearer(first))
+        self.assertEqual(rv.status_code, 200)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
