@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from hashlib import md5
 import json
+import re
 import secrets
 from time import time
 from typing import Optional
@@ -14,6 +15,12 @@ import redis
 import rq
 from app import db, login
 from app.search import add_to_index, remove_from_index, query_index
+
+
+def parse_tags(text):
+    """Return the hashtags in text, lower-cased, without '#', each once."""
+    return list(dict.fromkeys(
+        tag.lower() for tag in re.findall(r'#([A-Za-z0-9_]+)', text)))
 
 
 class SearchableMixin:
@@ -284,7 +291,17 @@ def load_user(id):
     return db.session.get(User, int(id))
 
 
-class Post(SearchableMixin, db.Model):
+post_tag = sa.Table(
+    'post_tag',
+    db.metadata,
+    sa.Column('post_id', sa.Integer, sa.ForeignKey('post.id'),
+              primary_key=True),
+    sa.Column('tag_id', sa.Integer, sa.ForeignKey('tag.id'),
+              primary_key=True, index=True)
+)
+
+
+class Post(PaginatedAPIMixin, SearchableMixin, db.Model):
     __searchable__ = ['body']
     id: so.Mapped[int] = so.mapped_column(primary_key=True)
     body: so.Mapped[str] = so.mapped_column(sa.String(140))
@@ -295,9 +312,46 @@ class Post(SearchableMixin, db.Model):
     language: so.Mapped[Optional[str]] = so.mapped_column(sa.String(5))
 
     author: so.Mapped[User] = so.relationship(back_populates='posts')
+    tags: so.WriteOnlyMapped['Tag'] = so.relationship(
+        secondary=post_tag, back_populates='posts')
 
     def __repr__(self):
         return '<Post {}>'.format(self.body)
+
+    def add_tags_from_body(self):
+        names = parse_tags(self.body)
+        if not names:
+            return
+        existing = {tag.name: tag for tag in db.session.scalars(
+            sa.select(Tag).where(Tag.name.in_(names)))}
+        self.tags.add_all([existing.get(name) or Tag(name=name)
+                           for name in names])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'body': self.body,
+            'timestamp': self.timestamp.replace(
+                tzinfo=timezone.utc).isoformat(),
+            'language': self.language or None,
+            'tags': [tag.name for tag in db.session.scalars(
+                self.tags.select().order_by(Tag.name))],
+            '_links': {
+                'author': url_for('api.get_user', id=self.user_id),
+            }
+        }
+
+
+class Tag(db.Model):
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String(140), index=True,
+                                            unique=True)
+
+    posts: so.WriteOnlyMapped[Post] = so.relationship(
+        secondary=post_tag, back_populates='tags')
+
+    def __repr__(self):
+        return '<Tag {}>'.format(self.name)
 
 
 class Message(db.Model):
