@@ -96,9 +96,9 @@ Lane 1 runs first. Lanes 2, 3 and 4 then run in parallel, followed by lane 5 and
 
 ## Status
 
-- [ ] Lane 1 - model and migration
-- [ ] Lane 2 - web routes and templates
-- [ ] Lane 3 - API
-- [ ] Lane 4 - trending box
-- [ ] Lane 5 - tests
-- [ ] Review
+- [x] Lane 1 - model and migration: `Tag`, `post_tags`, `Post.tags`, `Post.set_tags_from_body()`, `Tag.trending()`, `Post.to_dict()`; migration `765dc8e29d56` (tag and post_tags only; upgrade and downgrade checked)
+- [x] Lane 2 - web routes and templates: tags stored on post create, `/tag/<name>` paginated with 404 for unknown tags, `linkify_tags` filter escapes the body
+- [x] Lane 3 - API: `GET /api/tags/<name>/posts`, token auth, `per_page` capped at 100, 404 for unknown tags
+- [x] Lane 4 - trending box: `trending_tags()` context processor, `_trending.html` on the home page only
+- [x] Lane 5 - tests: 10 new tests in `HashtagCase`; `python -m unittest tests` runs 19 tests, all pass
+- [x] Review: every changed file belongs to one lane; no findings above low

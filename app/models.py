@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from hashlib import md5
 import json
+import re
 import secrets
 from time import time
 from typing import Optional
@@ -284,7 +285,45 @@ def load_user(id):
     return db.session.get(User, int(id))
 
 
-class Post(SearchableMixin, db.Model):
+TAG_PATTERN = re.compile(r'(?<![\w&])#(\w{1,50})')
+
+post_tags = sa.Table(
+    'post_tags',
+    db.metadata,
+    sa.Column('post_id', sa.Integer, sa.ForeignKey('post.id'),
+              primary_key=True),
+    sa.Column('tag_id', sa.Integer, sa.ForeignKey('tag.id'),
+              primary_key=True)
+)
+
+
+class Tag(db.Model):
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    name: so.Mapped[str] = so.mapped_column(sa.String(50), index=True,
+                                            unique=True)
+
+    posts: so.WriteOnlyMapped['Post'] = so.relationship(
+        secondary=post_tags, back_populates='tags')
+
+    def __repr__(self):
+        return '<Tag {}>'.format(self.name)
+
+    @staticmethod
+    def trending(limit=5, days=7):
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        uses = sa.func.count(Post.id).label('uses')
+        query = (
+            sa.select(Tag, uses)
+            .join(post_tags, post_tags.c.tag_id == Tag.id)
+            .join(Post, Post.id == post_tags.c.post_id)
+            .where(Post.timestamp >= since)
+            .group_by(Tag.id)
+            .order_by(uses.desc(), Tag.name)
+            .limit(limit))
+        return db.session.execute(query).all()
+
+
+class Post(PaginatedAPIMixin, SearchableMixin, db.Model):
     __searchable__ = ['body']
     id: so.Mapped[int] = so.mapped_column(primary_key=True)
     body: so.Mapped[str] = so.mapped_column(sa.String(140))
@@ -295,9 +334,44 @@ class Post(SearchableMixin, db.Model):
     language: so.Mapped[Optional[str]] = so.mapped_column(sa.String(5))
 
     author: so.Mapped[User] = so.relationship(back_populates='posts')
+    tags: so.Mapped[list['Tag']] = so.relationship(
+        secondary=post_tags, back_populates='posts')
 
     def __repr__(self):
         return '<Post {}>'.format(self.body)
+
+    @staticmethod
+    def parse_tags(body):
+        names = []
+        for match in TAG_PATTERN.finditer(body or ''):
+            name = match.group(1).lower()
+            if name not in names:
+                names.append(name)
+        return names
+
+    def set_tags_from_body(self):
+        tags = []
+        for name in self.parse_tags(self.body):
+            tag = db.session.scalar(sa.select(Tag).where(Tag.name == name))
+            if tag is None:
+                tag = Tag(name=name)
+                db.session.add(tag)
+            tags.append(tag)
+        self.tags = tags
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'body': self.body,
+            'timestamp': self.timestamp.replace(
+                tzinfo=timezone.utc).isoformat(),
+            'language': self.language,
+            'author': self.author.username,
+            'tags': [tag.name for tag in self.tags],
+            '_links': {
+                'author': url_for('api.get_user', id=self.user_id),
+            }
+        }
 
 
 class Message(db.Model):

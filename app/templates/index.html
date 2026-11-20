@@ -5,6 +5,7 @@
     <h1>{{ _('Hi, %(username)s!', username=current_user.username) }}</h1>
     {% if form %}
     {{ wtf.quick_form(form) }}
+    {% include '_trending.html' %}
     {% endif %}
     {% for post in posts %}
         {% include '_post.html' %}

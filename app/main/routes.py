@@ -5,10 +5,12 @@ from flask_login import current_user, login_required
 from flask_babel import _, get_locale
 import sqlalchemy as sa
 from langdetect import detect, LangDetectException
+from markupsafe import Markup, escape
 from app import db
 from app.main.forms import EditProfileForm, EmptyForm, PostForm, SearchForm, \
     MessageForm
-from app.models import User, Post, Message, Notification
+from app.models import User, Post, Message, Notification, Tag, \
+    TAG_PATTERN
 from app.translate import translate
 from app.main import bp
 
@@ -35,6 +37,7 @@ def index():
         post = Post(body=form.post.data, author=current_user,
                     language=language)
         db.session.add(post)
+        post.set_tags_from_body()
         db.session.commit()
         flash(_('Your post is now live!'))
         return redirect(url_for('main.index'))
@@ -64,6 +67,38 @@ def explore():
     prev_url = url_for('main.explore', page=posts.prev_num) \
         if posts.has_prev else None
     return render_template('index.html', title=_('Explore'),
+                           posts=posts.items, next_url=next_url,
+                           prev_url=prev_url)
+
+
+@bp.app_template_filter('linkify_tags')
+def linkify_tags(body):
+    parts = []
+    last = 0
+    for match in TAG_PATTERN.finditer(body or ''):
+        parts.append(escape(body[last:match.start()]))
+        url = url_for('main.tag', name=match.group(1).lower())
+        parts.append(Markup('<a href="{}">#{}</a>').format(
+            url, match.group(1)))
+        last = match.end()
+    parts.append(escape((body or '')[last:]))
+    return Markup('').join(parts)
+
+
+@bp.route('/tag/<name>')
+@login_required
+def tag(name):
+    tag = db.first_or_404(sa.select(Tag).where(Tag.name == name.lower()))
+    page = request.args.get('page', 1, type=int)
+    query = tag.posts.select().order_by(Post.timestamp.desc())
+    posts = db.paginate(query, page=page,
+                        per_page=current_app.config['POSTS_PER_PAGE'],
+                        error_out=False)
+    next_url = url_for('main.tag', name=tag.name, page=posts.next_num) \
+        if posts.has_next else None
+    prev_url = url_for('main.tag', name=tag.name, page=posts.prev_num) \
+        if posts.has_prev else None
+    return render_template('tag.html', title='#' + tag.name, tag=tag,
                            posts=posts.items, next_url=next_url,
                            prev_url=prev_url)
 

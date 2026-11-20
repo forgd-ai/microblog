@@ -1,0 +1,16 @@
+{% set trending = trending_tags() %}
+{% if trending %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">{{ _('Trending this week') }}</h5>
+            <ul class="list-inline mb-0">
+                {% for tag, uses in trending %}
+                <li class="list-inline-item">
+                    <a href="{{ url_for('main.tag', name=tag.name) }}">#{{ tag.name }}</a>
+                    <span class="badge text-bg-secondary">{{ uses }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+{% endif %}
