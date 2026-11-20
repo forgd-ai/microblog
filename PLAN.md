@@ -90,6 +90,10 @@ Every file belongs to exactly one lane. An agent edits only the files its lane l
   - Test link rendering.
 - **Done when:** `python -m unittest tests` passes.
 
+## Outside the lanes
+
+- `seed_demo.py` is a checkpoint helper, not part of the feature. After a database reset it recreates the `demo` user (password `demo`) and five tagged posts.
+
 ## Order
 
 Lane 1 runs first. Lanes 2, 3 and 4 then run in parallel, followed by lane 5 and finally a read-only review of the diff against this plan.
